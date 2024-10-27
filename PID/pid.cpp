@@ -83,12 +83,47 @@ if(pid->limMin < proportional) {
 }
 
 //Now we have to actually clamp the integrator, the previous part above was actually used to figure out the limits we need to set on the integrator, this part implements it, so it will limit the integrator value
+if (pid->integrator > limMaxInt) {
+
+    pid->integrator = limMaxInt;
+
+} else if (pid->integrator < limMinInt) {
+
+pid->integrator = limMinInt;
+
+}
+
+//Now we have the derivative term or usually called a band-limited differentiator since we are cascading it with a low-pass filter 
+
+pid->differentiator = (2.0f * pid->Kd * (measurement - pid->prevMeasurement)
+//its the deriviative of the measure not the error. Essentially it is just implementing our equation from the notes pages.
+                    + (2.0f * pid->tau - pid->T) * pid->differentiator)
+                    / (2.0f * pid->tau + pid->T);
+
+//Compute output and apply the limits
+
+pid->out = proportional + pid->integrator + pid->differentiator;
+
+if (pid->out > pid->limMax) {
+
+    pid->out = pid->limMax;
+
+} else if (pid->out <pid->limMin) {
+
+    pid->out = pid->limMin;
+}
 
 
 
+//Now we need to store the error and measurement terms so we can use them once the loop runs again.
+
+pid->prevError = error;
+pid->prevMeasurement = measurement;
 
 
+//Return the PID output
 
+return pid->out; 
 
 
 }
