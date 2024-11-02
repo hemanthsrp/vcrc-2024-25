@@ -1,129 +1,88 @@
-typedef struct{
-    //controller gains
-        float Kp;
-        float Ki;
-        float Kd;
+typedef struct {
+    // Controller gains
+    float Kp;    // Proportional gain
+    float Ki;    // Integral gain
+    float Kd;    // Derivative gain
 
-    //Low pass filter derivative time constant
-        float tau;
+    // Low-pass filter derivative time constant
+    float tau;
 
-    //controler memory 
-        float integrator;
-        float prevError;   //required for integrator 
-        float differentiator;
-        float prevMeasurement;  //required for differentiator 
+    // Controller memory
+    float integrator;        // Accumulates the integral of the error
+    float prevError;        // Previous error for integral calculation
+    float differentiator;   // Stores the derivative term
+    float prevMeasurement;   // Previous measurement for derivative calculation
 
-    //Output limits
-        float limMin;
-        float limMax;
+    // Output limits
+    float limMin;           // Minimum output limit
+    float limMax;           // Maximum output limit
 
-    //Sample time (in seconds) 
+    // Sample time (in seconds)
     float T;
 
-    //Controller output
-    float out;
-
-
+    // Controller output
+    float out;              // Current output of the PID controller
 
 } PIDController;
 
-
-
-//initialization, basically to reset the controller, could also use this function to pass in the gains and so forth, but not there yet
+// Initializes the PID controller by resetting its state variables.
+// This function can be extended in the future to accept gains as parameters.
 void PIDController_Init(PIDController *pid) {
-//Clear the controller variables 
-
-pid->integrator = 0.0f;
-pid->prevError = 0.0f;
-
-pid->differentiator = 0.0f;
-pid->prevMeasurement = 0.0f;
-
-pid->out = 0.0f;
-
+    // Clear the controller variables
+    pid->integrator = 0.0f;
+    pid->prevError = 0.0f;
+    pid->differentiator = 0.0f;
+    pid->prevMeasurement = 0.0f;
+    pid->out = 0.0f;
 }
 
-
-
-//Updates the function and computes the controller output
-//Takes the PID controller struct, setpoint value or the reference, and it also takes the measurement (which we get via feeback from the PIDs output or the systems output) and returns a float which is the controller output
+// Updates the PID controller and computes the output.
+// Takes a PID controller struct, setpoint (desired value), 
+// and measurement (actual value) as inputs, returning the computed output.
 float PIDController_Update(PIDController *pid, float setpoint, float measurement) {
+    // Calculate error signal
+    float error = setpoint - measurement;
 
-//error signal 
-float error = setpoint - measurement;
+    // Calculate proportional term: P[n] = Kp * e[n]
+    float proportional = pid->Kp * error;
 
-//proportional from the equation p[n] = Kp*e[n] in notebook 
-float proportional = pid->Kp * error;
+    // Calculate integral term
+    // Current integrator term depends on the previous value and the current error
+    pid->integrator += 0.5f * pid->Ki * pid->T * (error + pid->prevError);
 
-//integral 
-//Curent integrator term depends on the previous one plus the previous error from the previous integration, so the end of this function rule will store the error term in pid previous error 
-pid->integrator = pid->integrator + 0.5f * pid->Ki * pid->T * (error  + pid->prevError);
+    // Anti-windup: Calculate dynamic limits for the integrator
+    float limMinInt, limMaxInt;
 
-//Anti-windup (dynamic integrator clamping) it's essentially just figuring out the limits that we need to set on the integrator (it's not to saturate the output and make it overdrive)
-float limMinInt, limMaxInt;
+    // Compute the integrator limits based on output limits
+    limMaxInt = (pid->limMax > proportional) ? (pid->limMax - proportional) : 0.0f;
+    limMinInt = (pid->limMin < proportional) ? (pid->limMin - proportional) : 0.0f;
 
-//Compute the integrator limits
-if (pid->limMax > proportional) {
-    limMaxInt = pid->limMax - proportional;
+    // Clamp the integrator to prevent windup
+    if (pid->integrator > limMaxInt) {
+        pid->integrator = limMaxInt;
+    } else if (pid->integrator < limMinInt) {
+        pid->integrator = limMinInt;
+    }
 
-} else {
+    // Calculate the derivative term using a low-pass filter (band-limited differentiator)
+    pid->differentiator = (2.0f * pid->Kd * (measurement - pid->prevMeasurement)
+                          + (2.0f * pid->tau - pid->T) * pid->differentiator)
+                          / (2.0f * pid->tau + pid->T);
 
-    limMaxInt = 0.0f;
+    // Compute output and apply output limits
+    pid->out = proportional + pid->integrator + pid->differentiator;
 
-}
+    // Clamp the output to the specified limits
+    if (pid->out > pid->limMax) {
+        pid->out = pid->limMax;
+    } else if (pid->out < pid->limMin) {
+        pid->out = pid->limMin;
+    }
 
-if(pid->limMin < proportional) {
+    // Store the current error and measurement for the next update
+    pid->prevError = error;
+    pid->prevMeasurement = measurement;
 
-    limMinInt = pid->limMin - proportional;
-
-} else {
-
-    limMinInt = 0.0f;
-
-}
-
-//Now we have to actually clamp the integrator, the previous part above was actually used to figure out the limits we need to set on the integrator, this part implements it, so it will limit the integrator value
-if (pid->integrator > limMaxInt) {
-
-    pid->integrator = limMaxInt;
-
-} else if (pid->integrator < limMinInt) {
-
-pid->integrator = limMinInt;
-
-}
-
-//Now we have the derivative term or usually called a band-limited differentiator since we are cascading it with a low-pass filter 
-
-pid->differentiator = (2.0f * pid->Kd * (measurement - pid->prevMeasurement)
-//its the deriviative of the measure not the error. Essentially it is just implementing our equation from the notes pages.
-                    + (2.0f * pid->tau - pid->T) * pid->differentiator)
-                    / (2.0f * pid->tau + pid->T);
-
-//Compute output and apply the limits
-
-pid->out = proportional + pid->integrator + pid->differentiator;
-
-if (pid->out > pid->limMax) {
-
-    pid->out = pid->limMax;
-
-} else if (pid->out <pid->limMin) {
-
-    pid->out = pid->limMin;
-}
-
-
-
-//Now we need to store the error and measurement terms so we can use them once the loop runs again.
-
-pid->prevError = error;
-pid->prevMeasurement = measurement;
-
-
-//Return the PID output
-
-return pid->out; 
-
-
+    // Return the computed PID output
+    return pid->out;
 }
